@@ -13,7 +13,7 @@ frag_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence
   
   #listing the most frequent fragments
   mz_list <- msms$mz
-  all <- sort(unlist(nl_list))
+  all <- sort(unlist(mz_list))
   
   #grouping the NLs
   db <- dbscan(as.matrix(all), eps = 0.001, minPts = 3)
@@ -187,6 +187,7 @@ plot_mz <- function(rs, msms, matrix, thr, n){
     )
   }
 }
+
 
 
 
