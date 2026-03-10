@@ -9,7 +9,7 @@ library(qgam)
 #perm: the number of permutaiton test for Z-score calcualtion; min_presence and max_presence: number of minimum and maximum node having a spectral features;
 #Q and K: QGAM parameters (Q=quantile, K=k)
 
-frag_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.8, K=5){
+frag_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5){
   
   #listing the most frequent fragments
   mz_list <- msms$mz
@@ -187,6 +187,7 @@ plot_mz <- function(rs, msms, matrix, thr, n){
     )
   }
 }
+
 
 
 
