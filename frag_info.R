@@ -130,6 +130,8 @@ frag_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence
 }  
 
 
+#NB: this output cha ne merged with the output from "nl_info" function to consider both neutral losses and fragment ions effect on MN 
+
 #plotting the top results(according to QGAM residuals)
 #assuming rs is the data frame generated from 'nl_info' function, variable needs to be the same used in precedent function
 #n: number of the top spectral features to plot
