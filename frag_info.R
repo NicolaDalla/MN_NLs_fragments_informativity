@@ -8,15 +8,17 @@ library(qgam)
 #assuming that: msms is our MS/MS spectra in Spectra format; matrix: similaity natrix genrated form msms Spectra;
 #perm: the number of permutaiton test for Z-score calcualtion; min_presence and max_presence: number of minimum and maximum node having a spectral features;
 #Q and K: QGAM parameters (Q=quantile, K=k)
+#eps and minPts: DBscan parameters, where: eps: the maximum distance betweeen 2 points to be considered of the same group; 
+#                                          minPts: minimum indifiduals required to create a group
 
-frag_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5){
+frag_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, eps=0.001, minPts= 3){
   
   #listing the most frequent fragments
   mz_list <- msms$mz
   all <- sort(unlist(mz_list))
   
   #grouping the NLs
-  db <- dbscan(as.matrix(all), eps = 0.001, minPts = 3)
+  db <- dbscan(as.matrix(all), eps = eps, minPts = minPts)
   
   df <-data.frame(
     value = all,
