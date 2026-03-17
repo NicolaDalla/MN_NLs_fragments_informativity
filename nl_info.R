@@ -8,8 +8,11 @@ library(qgam)
 #assuming that: msms is our MS/MS spectra in Spectra format; matrix: similaity natrix genrated form msms Spectra;
 #perm: the number of permutaiton test for Z-score calcualtion; min_presence and max_presence: number of minimum and maximum node having a spectral features;
 #Q and K: QGAM parameters (Q=quantile, K=k)
+#eps and minPts: DBscan parameters, where: eps: the maximum distance betweeen 2 points to be considered of the same group; 
+#                                          minPts: minimum indifiduals required to create a group
 
-nl_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5){
+
+nl_info <- function(matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, eps=0.001, minPts= 3){
   
   #calculatin NLs
   neutral_loss <- function(x, precursorMz, ...) {
