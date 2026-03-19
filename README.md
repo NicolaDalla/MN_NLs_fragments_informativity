@@ -32,7 +32,8 @@ Ranks **neutral losses** or **fragment ion m/z values**  by their informativenes
 
 Function return a data frame where spectral features are ordered by their QGAM residuals, providing a prioritized list of features most characteristic of specific molecular network regions.
 
-Real_application.Rmd 
+### `Real_application.Rmd`
+
 contains the example of application of the function to an Alternaria fungi extracts datasets aquired in DDA.
 feature creation, MS/MS extraction and  plotting code of MN are included.
 ---
