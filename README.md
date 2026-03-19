@@ -25,25 +25,24 @@ For each spectral feature:
 
 ## Main functions
 
-Two main functions are provided:
+A main function is provided:
 
-### `nl_info()`
-Ranks **neutral losses** by their informativeness in a molecular network.
+### `MN_info()`
+Ranks **neutral losses** or **fragment ion m/z values**  by their informativeness in a molecular network.
 
-### `frag_info()`
-Ranks **fragment ion m/z values** by their informativeness in a molecular network.
-
-Both functions return a data frame where spectral features are ordered by their QGAM residuals, providing a prioritized list of features most characteristic of specific molecular network regions.
+Function return a data frame where spectral features are ordered by their QGAM residuals, providing a prioritized list of features most characteristic of specific molecular network regions.
 
 ---
 
 ## Input
 
-Both functions require:
+The function require:
+- **"method"** parameter: "FIs" if we want to investigate Fragment Ions informativity, "NLs" if we want to investigate neutral losses informativity.
 - an MS/MS dataset in **Spectra** format,
 - a similarity matrix or molecular network representation.
 
 The implementation allows users to control:
+- DBscan grouping parameters
 - spectral similarity threshold for network construction,
 - number of permutations,
 - m/z tolerance,
@@ -79,5 +78,5 @@ This package relies on:
 
 1. Import MS/MS data as a `Spectra` object and calculte spectral similarities 
 2. Construct a molecular network  
-3. Run `nl_info()` or `frag_info()`  
+3. Run `MN_info()` for FIs or NLs "method" parameter (the merging of the two output is possible)
 4. Visualize feature informativeness using the returned ranking or built-in plotting functions  
