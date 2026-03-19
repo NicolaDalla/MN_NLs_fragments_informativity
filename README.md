@@ -36,12 +36,13 @@ Function return a data frame where spectral features are ordered by their QGAM r
 
 contains the example of application of the function to an Alternaria fungi extracts datasets acquired in DDA.  
 feature creation, MS/MS extraction and plotting code of MN are included.
+
 ---
 
 ## Input
 
 The function require:
-- **"method"** parameter: "FIs" if we want to investigate Fragment Ions informativity, "NLs" if we want to investigate neutral losses informativity.
+- "method" parameter: "FIs" if we want to investigate Fragment Ions informativity, "NLs" if we want to investigate neutral losses informativity.
 - an MS/MS dataset in **Spectra** format,
 - a similarity matrix or molecular network representation.
 
