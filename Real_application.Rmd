@@ -1,0 +1,530 @@
+---
+title: "Application_example"
+author: "Nicola Dalla Valle"
+date: "2025-09-30"
+output: html_document
+---
+
+```{r warnings=FALSE}
+library(igraph)
+library(dplyr)
+library(Spectra)
+library(tidyverse)
+library(Spectra)
+library(xcms)
+library(MsExperiment)
+library(MsCoreUtils)
+library(purrr)
+library(MASS) 
+library(dbscan)
+library(qgam)
+```
+
+#MS/MS extraction and dataset processing
+
+loading files which include DDA experiments
+
+```{r}
+pth <- file.path( "alternaria_data/pos/data/mzML")
+fls <- list.files(pth, pattern = "mzML", full.names = TRUE)
+fls <- fls[grep("DDA", fls)] 
+```
+
+peak piking 
+ 
+```{r}
+mse <- readMsExperiment(spectraFiles = fls)
+
+#filter wrong spectra
+idx <- which(round(spectra(mse)$precursorMz) != round(spectra(mse)$isolationWindowTargetMz) & spectra(mse)$msLevel==2)
+filterByIndex <- function(x, index) { x[index] }
+filterSpectra(mse, filterByIndex, -idx)
+
+#peak piking
+cwp<- CentWaveParam(ppm = 8,
+                    peakwidth = c(3, 12),
+                     prefilter = c(6, 5000000),
+                     noise = 100000)
+data <- findChromPeaks(mse, param = cwp) 
+
+#indicating the type of sample
+sampleData(data)$sample_type <- "study"
+sampleData(data)$sample_type[grep("QC",sampleData(data)$spectraOrigin)] <- "QC"
+sampleData(data)$sample_type[grep("MEDW",sampleData(data)$spectraOrigin)] <- "MED"
+sampleData(data)$sample_type[grep("blank",sampleData(data)$spectraOrigin)] <- "blank"
+```
+
+peak filtering based on signal to noise ratio
+ 
+```{r}
+pks <- as.data.frame(chromPeaks(data))
+keep_peaks <- rownames(pks)[pks$sn > 25]  #filtre for s/n ratio
+data <- filterChromPeaks(data, peakid = keep_peaks)
+```
+ 
+features creation
+ 
+```{r}
+#' Peak refinement
+mnp <- MergeNeighboringPeaksParam(expandRt = 1, expandMz = 0.001,
+                                  minProp = 3/4)
+data <- refineChromPeaks(data, param = mnp)
+
+#' Alignment
+pdp1 <- PeakDensityParam(sampleGroups = sampleData(data)$sample_type, bw = 2,
+                         minFraction = 1, binSize = 0.01)
+data <- groupChromPeaks(data, param = pdp1)
+
+data <- adjustRtime(
+  data, 
+  param = PeakGroupsParam(minFraction = 1,
+                          subset = which(sampleData(data)$sample_type == "QC"),
+                          subsetAdjust = "average", 
+                          span = 0.2))
+
+#' Correspondence analysis
+pdp2 <- PeakDensityParam(sampleGroups =sampleData(data)$sample_type, bw = 2,
+                         minFraction = 0.7, binSize = 0.01) 
+data <- groupChromPeaks(data, param = pdp2)
+
+#' Gap-filling
+data <- fillChromPeaks(data, param = ChromPeakAreaParam())
+
+```
+
+feature filtering to consider "real" feature from biological sample
+
+```{r}
+xdata<- data
+#rt limitation
+data <- filterRt(data, rt=c(30,660))
+
+#filtering for missin values in Qcs
+f <- sampleData(data)$sample_type
+f[f != "QC"] <- NA
+missing_filter <- PercentMissingFilter(threshold = 20, f = f)
+data <- filterFeatures(object = data, filter = missing_filter)
+
+#filtering features with similar intensity to blank 
+blank_flags <- BlankFlag(threshold = 2,
+                    qcIndex = sampleData(data)$sample_type == "QC",
+                    blankIndex = sampleData(data)$sample_type == "blank")
+
+data <- filterFeatures(data, blank_flags)
+
+#elminate feature with similar  variability  to the QCs (likely noise)
+dratio_filter <- DratioFilter(
+    threshold = 0.5,
+    qcIndex = sampleData(data)$sample_type == "QC",
+    studyIndex = sampleData(data)$sample_type == "study",
+    na.rm = TRUE)
+
+# Apply the filter to object
+data <- filterFeatures(object = data,
+                                  filter = dratio_filter)
+
+ftvalues <-data.frame(featureValues(data, value = "into", method="sum"))
+ftdetec <- data.frame(featureDefinitions(data))
+ftdetec$name <- rownames(ftdetec)
+ftvalues <- ftvalues[rownames(ftvalues) %in% rownames(ftdetec),]
+ftdetec$meanval <- colMeans(t(ftvalues), na.rm = TRUE)
+
+```
+
+searching for msms related to each features
+ 
+```{r}
+ms2_spectra <- featureSpectra(data, expandRt = 0, return.type = "Spectra",
+                              method ="largest_bpi",
+                              ppm = 5, 
+                              featureColumns = c("mzmed", "rtmed", "rtmin", "rtmax"))
+
+ms2_spectra$id <- paste0(basename(ms2_spectra$dataOrigin), ms2_spectra$scanIndex)
+
+#features with at leat one fragmentation spectra
+features <- unique(spectraData(ms2_spectra)$feature_id)
+
+```
+
+selecting one ms2 for each feature, selecting the one with highest base peak intensity
+
+```{r}
+
+sp <- split(spectraData(ms2_spectra), spectraData(ms2_spectra)$feature_id)
+
+cp <- vapply(sp, function(x){
+    x$chrom_peak_id[which.max(x$basePeakIntensity)]
+}, character(1))
+
+ms2_spectra <- ms2_spectra[which(spectraData(ms2_spectra)$chrom_peak_id %in% cp)]
+```
+
+at this point I have one fragmentation spectra for each selected and filtered feature, relative only to real biological sample features.
+
+#MS/MS similarity 
+
+making matrix calculation applying GNPS method(considering both m/z and neutral loss matches).
+prior Cosine calaualtion, msms are cleaned and precursor ion, if present, is removed.
+
+```{r}
+#Noise cleaning
+#function to clean msms
+cleaning_ref<- function(ms2){
+  ms2_tb <- as.data.frame(
+    spectraData(ms2) 
+  ) %>%
+  mutate(ms2_raw = map2(mz(ms2), intensity(ms2), ~{
+    if (length(.x) == 0 || length(.y) == 0)
+      return(data.frame(mz = numeric(0), intensity = numeric(0)))
+    data.frame(mz = as.numeric(.x), intensity = as.numeric(.y))
+  })) %>%
+    mutate(ms2_RLM = purrr::map(ms2_raw, function(t){
+         if (is.null(t) || nrow(t) == 0 || !"intensity" %in% names(t))
+        return(tibble(mz = numeric(0), intensity = numeric(0)))
+      t <- t %>%
+        filter(intensity>0) %>%
+        arrange(intensity) %>%
+        mutate(order = seq(nrow(.)))
+      p75 <- t %>%
+        pull(intensity) %>% 
+        quantile(0.75)
+      u <- t %>%
+        filter(intensity < p75)
+      if(nrow(u)>3){
+        mdl <- rlm(data = u, log10(intensity) ~ order)
+        t_filt<- t %>% 
+          mutate(pred = predict(mdl, t)) %>%
+          mutate(res = abs(pred - log10(intensity))) %>%
+          filter(res > sd(residuals(mdl))*3) %>%
+          arrange(mz)
+        if (nrow(t_filt) > 0) {
+          t<- t_filt
+        } else {
+          t<- t %>% arrange(mz)
+        }
+      } else {
+        return(t %>% arrange(mz))  # Not enough points to model
+      }
+    }))
+  ms2_cl <- ms2_tb %>%
+    mutate(
+      mz = purrr::map(ms2_RLM, ~ .x$mz),
+      intensity = purrr::map(ms2_RLM, ~ .x$intensity)
+    ) %>%
+    filter(map_lgl(mz, ~ length(.x) > 0)) %>%
+    as.data.frame() %>%
+    Spectra()
+  return(ms2_cl)
+}
+
+spspos <- cleaning_ref(ms2_spectra)
+
+ftpos <- ftdetec[which(ftdetec$name %in% spspos$feature_id),]
+fts <-ftpos$name
+sps <- spspos[which(spspos$feature_id %in%fts )]
+
+#Remove precursor peaks 
+spc <- filterPrecursorPeaks(sps, ppm = 50, mz = ">=") %>%
+   scalePeaks()
+spc <- spc[lengths(spc)>0]
+
+#similarity claualtion
+matrix <- compareSpectra(spc, MAPFUN = joinPeaksGnps, tolerance = 0.01, FUN = MsCoreUtils::gnps)
+colnames(matrix)<- spc$feature_id
+rownames(matrix)<- spc$feature_id
+```
+
+#MN NLs and FIs informativity 
+
+function for spectral features informativity ranking
+
+```{r}
+
+MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, eps=0.001, minPts= 3){
+#for NLs investigation
+  if(method=="NLs"){
+    #calculatin NLs
+    neutral_loss <- function(x, precursorMz, ...) {
+      x[, "mz"] <- precursorMz - x[, "mz"]
+      x[order(x[, "mz"]), , drop = FALSE]
+    }
+    nl <- addProcessing(msms, neutral_loss,
+                        spectraVariables = "precursorMz")
+    msms$nl<- mz(nl)
+    
+    #listing the most frequent losses 
+    nl_list <- msms$nl
+    all <- sort(unlist(nl_list))
+    
+    #grouping the NLs
+    db <- dbscan(as.matrix(all), eps = eps, minPts = minPts)
+    
+    df <-data.frame(
+      value = all,
+      cluster = db$cluster
+    )
+    
+    df <- df %>%
+      filter(cluster != 0) %>%    
+      group_by(cluster) %>%
+      summarise(
+        val = mean(value),
+        freq = n()
+      ) %>%
+      arrange(desc(freq)) %>%
+      filter(freq>min_presence & freq< max_presence)
+  }
+  
+#for FIs investigation
+  if(method=="FIs"){
+    #listing the most frequent fragments
+    mz_list <- msms$mz
+    all <- sort(unlist(mz_list))
+    
+    #grouping the m/z
+    db <- dbscan(as.matrix(all), eps = 0.001, minPts = 3)
+    
+    df <-data.frame(
+      value = all,
+      cluster = db$cluster
+    )
+    
+    df <- df %>%
+      filter(cluster != 0) %>%    
+      group_by(cluster) %>%
+      summarise(
+        val = mean(value),
+        freq = n()
+      ) %>%
+      arrange(desc(freq)) %>%
+      filter(freq>min_presence & freq< max_presence)
+  }
+  
+  #creating the igraph object
+  create_edge_list <- function(similarity_matrix, thr, spectra) {
+    non_zero_indices <- which(similarity_matrix > thr, arr.ind = TRUE)
+    if (length(non_zero_indices) > 0 && is.null(dim(non_zero_indices))) {
+      non_zero_indices <- matrix(non_zero_indices, ncol = 2, byrow = TRUE)
+    }
+    if (length(non_zero_indices) == 0) {
+      return(data.frame(from = character(), to = character(), weight = numeric()))
+    }
+    non_zero_indices <- non_zero_indices[non_zero_indices[, 1] < non_zero_indices[, 2], , drop = FALSE]
+    if (nrow(non_zero_indices) == 0) {
+      return(data.frame(from = character(), to = character(), weight = numeric()))
+    }
+    edges <- data.frame(
+      from = spectra$id[non_zero_indices[, 1]],
+      to = spectra$id[non_zero_indices[, 2]],
+      weight = similarity_matrix[non_zero_indices]
+    )
+    return(edges)
+  }
+  
+  edges <- create_edge_list(matrix,thr, msms)
+  involved_nodes <- unique(c(edges$from, edges$to))
+  idx <- match(involved_nodes, msms$id)
+  nodes <- data.frame(
+    id = msms$id[idx]
+  )
+  graph <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+  
+  if(method=="NLs"){
+  list <- msms$nl[match(V(graph)$name, msms$id)]}
+  if(method=="FIs"){
+  list <- msms$mz[match(V(graph)$name, msms$id)]}
+  
+  #df for results
+  results <- data.frame(
+    value = df$val, 
+    number = NA_real_,
+    z_score = NA_real_
+  )
+  
+  #calculating unsuipervized community
+  cl <- cluster_louvain(graph)
+  V(graph)$unsupervised <- membership(cl)
+  
+  #calculating metrics fo each NL or mz
+  for (i in seq_len(nrow(results))) {
+    nli <- results$value[i]
+    has_nl <- vapply(seq_along(list), function(j) {
+      vals <- as.numeric(as.character(list[[j]]))
+      any(abs(vals - nli) <= 0.005, na.rm = TRUE)
+    }, logical(1))
+    
+    n_group <- sum(has_nl)
+    results$number[i] <- n_group
+    
+    if (sum(n_group) >= min_presence & sum(n_group) <= max_presence) {
+      
+      #MODULARITY z-score
+      V(graph)$comm <- ifelse(has_nl, 1, 2)
+      mod_real <- modularity(graph, membership = V(graph)$comm)
+      
+      rand_mod <- replicate(perm, {
+        rand_nodes <- sample(vcount(graph), sum(has_nl))
+        comm <- rep(2, vcount(graph))
+        comm[rand_nodes] <- 1
+        modularity(graph, membership = comm)
+      })
+      
+      if (is.na(mod_real) || sd(rand_mod, na.rm = TRUE) == 0) {
+        z <- NA
+      } else {
+        
+        z <- (mod_real - abs(mean(rand_mod, na.rm = TRUE))) / sd(rand_mod, na.rm = TRUE)
+        
+      }
+      
+      results$z_score[i] <- z
+      
+    } 
+  }
+  results<- results[!is.na(results$z_score),]
+  
+  #compute QGAM model and calculate the residuals
+  results$log_num <- log10(results$number)
+  qg <- qgam(
+    z_score ~ s(log_num , k = K),
+    data = results,
+    qu = Q
+  )
+  
+  q_pred <- predict(qg)
+  results$excess <- results$z_score - q_pred
+  results <- results %>%
+    dplyr::select(-log_num)
+  return(results)
+}
+
+```
+
+application of the function to NLs and FIs 
+Then, I consider both FIs and NLs to evaluate overall influence on MN
+ 
+```{r}
+#neutral losses
+nls <- MN_info(method="NLs",matrix, spc, perm=100, thr= 0.7, min_presence = 10)
+
+#fragment ions
+mzs <- MN_info(method="FIs",matrix, spc, perm=100, thr= 0.7, min_presence = 10)
+
+#merging the results 
+nls <- nls %>%
+  dplyr::select(value, number, z_score, excess) %>%
+  mutate(origin="NL") %>%
+  mutate(log_number= log10(number))
+
+mzs <- mzs %>%
+  dplyr::select(value, number, z_score, excess) %>%
+  mutate(origin="mz")%>%
+  mutate(log_number= log10(number))
+
+alldf <- rbind(nls, mzs) %>%
+  arrange(desc(excess))
+```
+
+visualizing MN with specific FIs of NLs highlited
+
+```{r}
+library(visNetwork)
+
+#extracion of NLs for all msms
+neutral_loss <- function(x, precursorMz, ...) {
+    # Keep only peaks with at least 5% of the base peak intensity
+    base_intensity <- max(x[, "intensity"], na.rm = TRUE)
+    x <- x[x[, "intensity"] >= 0.00 * base_intensity, , drop = FALSE]
+    
+    # Compute neutral loss
+    x[, "mz"] <- precursorMz - x[, "mz"]
+    
+    # Sort by neutral loss m/z
+    x[order(x[, "mz"]), , drop = FALSE]
+  }
+  nl <- addProcessing(msms, neutral_loss,
+                      spectraVariables = "precursorMz")
+  msms$nl<- mz(nl)
+  
+#igrah object creation
+  
+mat_thr <- matrix
+mat_thr[mat_thr < 0.7] <- 0    
+
+g <- graph_from_adjacency_matrix(
+  mat_thr,
+  mode = "undirected",
+  weighted = TRUE, 
+  diag = FALSE
+)
+g <- delete_vertices(g, V(g)[degree(g) == 0])
+
+#nodes creation
+nodes <- data.frame(
+  id=as.character(unique(V(g)$name))
+)
+idx <- match(nodes$id, msms$feature_id)
+
+nodes$mz<- precursorMz(msms)[idx]
+nodes$rt <- rtime(msms)[idx]/60 
+nodes$frag <- mz(msms)[idx]
+nodes$nl <- msms$nl[idx]
+
+set.seed(123)  
+layout_fr <- layout_with_fr(g)
+
+nodes$x <- layout_fr[,1]*100
+nodes$y <- layout_fr[,2]*100
+
+#MATCHES
+tol <- 0.005
+
+#for neutral losses
+nl_targets <- c(123.456)
+nodes$has_all_nl <- map_lgl(nodes$nl, function(vals) {
+  vals <- as.numeric(as.character(vals))
+  all(sapply(nl_targets, function(nli) any(abs(vals - nli) <= tol, na.rm = TRUE)))
+})
+
+#for mz vlaues
+mz_targets <- c(123.456)
+nodes$has_all_mz <- map_lgl(nodes$frag, function(vals) {
+  vals <- as.numeric(as.character(vals))
+  all(sapply(mz_targets, function(nli) any(abs(vals - nli) <= tol, na.rm = TRUE)))
+})
+
+#colours according to mz matches
+edges <- igraph::as_data_frame(g, what = "edges")
+nodes$color.background <- case_when(
+  nodes$has_all_nl ~ "navy",
+  nodes$has_all_mz ~ "indianred",
+  TRUE             ~ "grey"
+)
+
+#MN plotting
+network_plot <- visNetwork(nodes %>%
+                             dplyr::select(-c(nl, frag)), edges) %>%
+ visNodes(
+    x = ~x,
+    y = ~y,
+    fixed = TRUE,
+    label = NULL,
+    shape = "dot",
+    borderWidth = 0,
+    color = list(border = "", highlight = "red")
+  ) %>%
+  visEdges(
+    color = list(color = "lightgray", highlight = "blue"),
+    width = 2
+  ) %>%
+  visOptions(
+    highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
+    nodesIdSelection = FALSE
+  ) %>%
+  visPhysics(enabled = FALSE)
+
+
+network_plot
+```
+
+
