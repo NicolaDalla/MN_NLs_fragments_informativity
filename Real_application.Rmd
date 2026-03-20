@@ -240,7 +240,7 @@ function for spectral features informativity ranking
 
 ```{r}
 
-MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, eps=0.001, minPts= 3){
+MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, tolerance=0.005){
 #for NLs investigation
   if(method=="NLs"){
     #calculatin NLs
@@ -255,24 +255,6 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
     #listing the most frequent losses 
     nl_list <- msms$nl
     all <- sort(unlist(nl_list))
-    
-    #grouping the NLs
-    db <- dbscan(as.matrix(all), eps = eps, minPts = minPts)
-    
-    df <-data.frame(
-      value = all,
-      cluster = db$cluster
-    )
-    
-    df <- df %>%
-      filter(cluster != 0) %>%    
-      group_by(cluster) %>%
-      summarise(
-        val = mean(value),
-        freq = n()
-      ) %>%
-      arrange(desc(freq)) %>%
-      filter(freq>min_presence & freq< max_presence)
   }
   
 #for FIs investigation
@@ -280,13 +262,14 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
     #listing the most frequent fragments
     mz_list <- msms$mz
     all <- sort(unlist(mz_list))
-    
-    #grouping the m/z
-    db <- dbscan(as.matrix(all), eps = 0.001, minPts = 3)
+  }
+  
+ #grouping the spectral feature
+    gr <- MsCoreUtils::group(all, tolerance = tolerance)
     
     df <-data.frame(
       value = all,
-      cluster = db$cluster
+      cluster =gr
     )
     
     df <- df %>%
@@ -298,7 +281,6 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
       ) %>%
       arrange(desc(freq)) %>%
       filter(freq>min_presence & freq< max_presence)
-  }
   
   #creating the igraph object
   create_edge_list <- function(similarity_matrix, thr, spectra) {
@@ -340,10 +322,6 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
     number = NA_real_,
     z_score = NA_real_
   )
-  
-  #calculating unsuipervized community
-  cl <- cluster_louvain(graph)
-  V(graph)$unsupervised <- membership(cl)
   
   #calculating metrics fo each NL or mz
   for (i in seq_len(nrow(results))) {
