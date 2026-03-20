@@ -3,17 +3,18 @@ library(tidyverse)
 library(dplyr)
 library(Spectra)
 library(qgam)
+libray(MsCoreUtils)
 
 ##function for MN spectral features informativity 
 #we can investigate neutral losses or fragment ions, according to "method" parameters which can be set to "FIs" or "NLs"
 #assuming that: msms is our MS/MS spectra in Spectra format; matrix: similarity matrix generated form msms Spectra;
 #perm: the number of permutation test for Z-score calculation; min_presence and max_presence: number of minimum and maximum node having a spectral features;
 #Q and K: QGAM parameters (Q=quantile, K=k)
-#eps and minPts: DBscan parameters, where: eps: the maximum distance betweeen 2 points to be considered of the same group; 
-#                                          minPts: minimum indifiduals required to create a group
+#tolernace: m/z tolerance in group fonction for spectral feature creation
 
 
-MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, eps=0.001, minPts= 3){
+MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_presence=length(msms), Q=0.5, K=5, tolerance=0.005){
+  
   #for NLs investigation
   if(method=="NLs"){
     #calculatin NLs
@@ -28,41 +29,24 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
     #listing the most frequent losses 
     nl_list <- msms$nl
     all <- sort(unlist(nl_list))
-    
-    #grouping the NLs
-    db <- dbscan(as.matrix(all), eps = eps, minPts = minPts)
-    
-    df <-data.frame(
-      value = all,
-      cluster = db$cluster
-    )
-    
-    df <- df %>%
-      filter(cluster != 0) %>%    
-      group_by(cluster) %>%
-      summarise(
-        val = mean(value),
-        freq = n()
-      ) %>%
-      arrange(desc(freq)) %>%
-      filter(freq>min_presence & freq< max_presence)
   }
   
-  #for FIs investigation
+#for FIs investigation
   if(method=="FIs"){
     #listing the most frequent fragments
     mz_list <- msms$mz
     all <- sort(unlist(mz_list))
-    
-    #grouping the m/z
-    db <- dbscan(as.matrix(all), eps = 0.001, minPts = 3)
+  }
+  
+ #grouping the spectral feature
+    gr <- MsCoreUtils::group(all, tolerance = tolerance)
     
     df <-data.frame(
       value = all,
-      cluster = db$cluster
+      cluster =gr
     )
     
-    df <- df %>%
+   df <- df %>%
       filter(cluster != 0) %>%    
       group_by(cluster) %>%
       summarise(
@@ -71,7 +55,6 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
       ) %>%
       arrange(desc(freq)) %>%
       filter(freq>min_presence & freq< max_presence)
-  }
   
   #creating the igraph object
   create_edge_list <- function(similarity_matrix, thr, spectra) {
@@ -113,10 +96,6 @@ MN_info <- function(method, matrix, msms, perm=100, thr, min_presence=10, max_pr
     number = NA_real_,
     z_score = NA_real_
   )
-  
-  #calculating unsuipervized community
-  cl <- cluster_louvain(graph)
-  V(graph)$unsupervised <- membership(cl)
   
   #calculating metrics fo each NL or mz
   for (i in seq_len(nrow(results))) {
