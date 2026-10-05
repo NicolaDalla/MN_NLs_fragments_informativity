@@ -10,7 +10,7 @@ library(plotly)
 library(visNetwork)
 library(viridis)
 
-source("../../functions/MN_info.R")
+source("MN_info.R")
 
 # ==============================================================================
 # UI
