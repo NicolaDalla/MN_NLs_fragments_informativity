@@ -2,6 +2,9 @@
 
 This repository provides an R implementation of a network-based framework to rank neutral losses and fragment ions according to their relevance for molecular network interpretation in untargeted metabolomics.
 
+Shiny app will enable a direct application of the method, with output visualization. Demo data are also avaiable.
+Direcr web app link: https://connect.posit.cloud/nicoladalla/content/01a10c5e-fe04-f399-c94e-617198d3dcfe?utm_source=rsconnect-rstudio
+
 Rather than modifying spectral similarity or network construction, this method adds an interpretative layer that quantifies how strongly individual spectral features (neutral losses or fragment m/z values) are associated with specific regions of a molecular network.
 
 The approach is based on network modularity, permutation testing, and frequency-adjusted ranking using Quantile Generalized Additive Models (QGAMs).
@@ -44,7 +47,7 @@ feature creation, MS/MS extraction and plotting code of MN are included.
 The function require:
 - "method" parameter: "FIs" if we want to investigate Fragment Ions informativity, "NLs" if we want to investigate neutral losses informativity.
 - an MS/MS dataset in **Spectra** format,
-- a similarity matrix or molecular network representation.
+- a similarity matrix.
 
 The implementation allows users to control:
 - spectral similarity threshold for network construction,
