@@ -47,7 +47,6 @@ The function require:
 - a similarity matrix or molecular network representation.
 
 The implementation allows users to control:
-- DBscan grouping parameters
 - spectral similarity threshold for network construction,
 - number of permutations,
 - m/z tolerance,
