@@ -74,7 +74,7 @@ This package relies on:
 
 - `Spectra` for MS/MS data handling  
 - `igraph` for molecular network analysis  
-- `dbscan` for m/z grouping  
+- `MsCoreUtils` for m/z grouping  
 - `qgam` for Quantile Generalized Additive Models  
 
 ---
