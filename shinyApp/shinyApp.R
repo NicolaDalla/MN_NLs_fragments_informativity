@@ -1,3 +1,11 @@
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+BiocManager::install(c("Spectra", "MsBackendMgf", "MsCoreUtils"))
+
+install.packages(c(
+  "shiny", "igraph", "tidyverse", "qgam", 
+  "ggplot2", "plotly", "visNetwork", "viridis"
+))
+
 library(shiny)
 library(igraph)
 library(tidyverse)
@@ -11,6 +19,8 @@ library(visNetwork)
 library(viridis)
 
 source("MN_info.R")
+
+
 
 # ==============================================================================
 # UI
