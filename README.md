@@ -5,6 +5,8 @@ This repository provides an R implementation of a network-based framework to ran
 Shiny app will enable a direct application of the method, with output visualization. Demo data are also avaiable.
 [Direct web app link](https://eo2tr9-nicola-dalla0valle.shinyapps.io/mn-explorer/)
 
+Reference: Dalla Valle, N., Franceschi, P., Garcia-Aloy, M., Robatscher, P., Oettl, S., & Oberhuber, M. (2026). Identification of diagnostic reporters in MS/MS molecular networks. Analytical Chemistry. https://doi.org/10.1021/acs.analchem.6c03306
+
 Rather than modifying spectral similarity or network construction, this method adds an interpretative layer that quantifies how strongly individual spectral features (neutral losses or fragment m/z values) are associated with specific regions of a molecular network.
 
 The approach is based on network modularity, permutation testing, and frequency-adjusted ranking using Quantile Generalized Additive Models (QGAMs).
